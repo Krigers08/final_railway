@@ -9,27 +9,45 @@ if (php_sapi_name() !== 'cli') {
 }
 
 require_once 'db.php';
-
+function insert_batch(PDO $pdo, string $table, array $columns, array $rows): void {
+    if (empty($rows)) return;
+    $cols = implode(', ', $columns);
+    $placeholders = [];
+    $params = [];
+    $idx = 1;
+    foreach ($rows as $row) {
+        $row_ph = [];
+        foreach ($columns as $i => $col) {
+            $val = $row[$i] ?? null;
+            $params[":p{$idx}"] = ($val === '' || $val === null) ? null : $val;
+            $row_ph[] = ":p{$idx}";
+            $idx++;
+        }
+        $placeholders[] = '(' . implode(',', $row_ph) . ')';
+    }
+    $sql = "INSERT INTO $table ($cols) VALUES " . implode(',', $placeholders) . " ON CONFLICT DO NOTHING";
+    $pdo->prepare($sql)->execute($params);
+}
 function import_csv(PDO $pdo, string $file, string $table, array $columns, ?callable $transform = null): int {
     $handle = fopen($file, 'r');
     if (!$handle) throw new Exception("Cannot open $file");
     fgetcsv($handle);
     $count = 0;
-    $cols = implode(', ', $columns);
-    $placeholders = implode(', ', array_map(fn($c) => ":$c", $columns));
-    $stmt = $pdo->prepare("INSERT INTO $table ($cols) VALUES ($placeholders) ON CONFLICT DO NOTHING");
+    $batch = [];
+    $batch_size = 500;
     while (($row = fgetcsv($handle)) !== false) {
         if ($transform) $row = $transform($row);
         if (!$row) continue;
-        $params = [];
-        foreach ($columns as $i => $col) {
-            $val = $row[$i] ?? null;
-            $params[":$col"] = ($val === '' || $val === null) ? null : $val;
-        }
-        $stmt->execute($params);
+        $batch[] = $row;
         $count++;
-        if ($count % 50 === 0) { echo "  $table: $count rows\n"; flush(); }
+        if (count($batch) >= $batch_size) {
+            insert_batch($pdo, $table, $columns, $batch);
+            echo "  $table: $count rows\n";
+            flush();
+            $batch = [];
+        }
     }
+    if (!empty($batch)) insert_batch($pdo, $table, $columns, $batch);
     fclose($handle);
     return $count;
 }
