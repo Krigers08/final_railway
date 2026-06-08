@@ -1,0 +1,5 @@
+kind: wasmer.io/App.v0
+name: northwind-railway
+owner: krigers08
+package: .
+app_id: da_nQgIotrU4MG4

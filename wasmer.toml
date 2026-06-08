@@ -1,0 +1,18 @@
+[dependencies]
+"php/php" = "^8.3.400"
+ 
+[fs]
+"/app" = "."
+ 
+[[command]]
+name = "run"
+module = "php/php:php"
+runner = "https://webc.org/runner/wasi"
+ 
+[command.annotations.wasi]
+main-args = ["-t", "/app", "-S", "0.0.0.0:8080"]
+env = ["DATABASE_PUBLIC_URL", "IMPORT_SECRET", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]
+ 
+[app]
+name = "northwind"
+ 
