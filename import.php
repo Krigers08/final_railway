@@ -34,7 +34,7 @@ function import_csv(PDO $pdo, string $file, string $table, array $columns, ?call
     fgetcsv($handle);
     $count = 0;
     $batch = [];
-    $batch_size = 500;
+    $batch_size = 1000;
     while (($row = fgetcsv($handle)) !== false) {
         if ($transform) $row = $transform($row);
         if (!$row) continue;

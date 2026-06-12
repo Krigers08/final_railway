@@ -198,6 +198,8 @@ tr:hover td { background: #f9fafb; }
   <a href="?page=orders"     class="<?= $page==='orders'     ?'active':'' ?>">Orders</a>
   <a href="?page=employees"  class="<?= $page==='employees'  ?'active':'' ?>">Employees</a>
   <a href="?page=suppliers"  class="<?= $page==='suppliers'  ?'active':'' ?>">Suppliers</a>
+  <a href="?page=reports" class="<?= $page==='reports' ?'active':'' ?>">Reports</a>
+  
   <a href="?page=insert"     class="<?= $page==='insert'     ?'active':'' ?>">+ Insert</a>
 </nav>
 <div class="container">
@@ -525,6 +527,115 @@ tr:hover td { background: #f9fafb; }
     <?php endforeach; ?>
   </table>
   <?= paginate_links('suppliers', $offset, $limit, $total, $extra) ?>
+
+  <?php elseif ($page === 'reports'): ?>
+    <h2>Reports</h2>
+    <div class="section">
+        <h2>Monthly Orders by Customer</h2>
+        <table>
+            <tr>
+                <th>Customer</th>
+                <th>Month</th>
+                <th>Order Count</th>
+                <th>Total Amount</th>
+            </tr>
+
+        <?php
+            $rows = $pdo->query("
+                SELECTc.company_name,
+                    TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
+                    COUNT(DISTINCT o.order_id) AS order_count,
+                    ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
+                FROM orders o
+                JOIN customers c ON c.customer_id = o.customer_id
+                JOIN order_details od ON od.order_id = o.order_id
+                GROUP BY c.company_name, DATE_TRUNC('month', o.order_date)
+                ORDER BY month DESC, c.company_name
+            ")->fetchAll();
+
+            foreach ($rows as $r):
+            ?>
+            <tr>
+                <td><?= htmlspecialchars($r['company_name']) ?></td>
+                <td><?= htmlspecialchars($r['month']) ?></td>
+                <td><?= $r['order_count'] ?></td>
+                <td>$<?= number_format($r['total_amount'], 2) ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        </div>
+    <div class="section">
+        <h2>Monthly Orders by Region</h2>
+
+        <table>
+            <tr>
+                <th>Region</th>
+                <th>Month</th>
+                <th>Order Count</th>
+                <th>Total Amount</th>
+            </tr>
+
+            <?php
+            $rows = $pdo->query("
+                SELECT
+                    COALESCE(o.ship_region, 'Unknown') AS region,
+                    TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
+                    COUNT(DISTINCT o.order_id) AS order_count,
+                    ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
+                FROM orders o
+                JOIN order_details od ON od.order_id = o.order_id
+                GROUP BY region, DATE_TRUNC('month', o.order_date)
+                ORDER BY month DESC, region
+            ")->fetchAll();
+
+            foreach ($rows as $r):
+            ?>
+            <tr>
+                <td><?= htmlspecialchars($r['region']) ?></td>
+                <td><?= htmlspecialchars($r['month']) ?></td>
+                <td><?= $r['order_count'] ?></td>
+                <td>$<?= number_format($r['total_amount'], 2) ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Monthly Orders by Employee</h2>
+
+        <table>
+            <tr>
+                <th>Employee</th>
+                <th>Month</th>
+                <th>Order Count</th>
+                <th>Total Amount</th>
+            </tr>
+
+            <?php
+            $rows = $pdo->query("
+                SELECT
+                    CONCAT(e.first_name, ' ', e.last_name) AS employee,
+                    TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
+                    COUNT(DISTINCT o.order_id) AS order_count,
+                    ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
+                FROM orders o
+                JOIN employees e ON e.employee_id = o.employee_id
+                JOIN order_details od ON od.order_id = o.order_id
+                GROUP BY employee, DATE_TRUNC('month', o.order_date)
+                ORDER BY month DESC, employee
+            ")->fetchAll();
+
+            foreach ($rows as $r):
+            ?>
+            <tr>
+                <td><?= htmlspecialchars($r['employee']) ?></td>
+                <td><?= htmlspecialchars($r['month']) ?></td>
+                <td><?= $r['order_count'] ?></td>
+                <td>$<?= number_format($r['total_amount'], 2) ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
 
 <?php elseif ($page === 'insert'): ?>
   <h2>Insert Record</h2>
