@@ -115,9 +115,48 @@ function build_filter_params(array $filters = []): array {
 function th_sort(string $col, string $label, string $cur_sort, string $cur_dir, array $extra = []): string {
     $new_dir = ($cur_sort === $col && $cur_dir === 'ASC') ? 'desc' : 'asc';
     $arrow   = '';
-    if ($cur_sort === $col) $arrow = $cur_dir === 'ASC' ? ' ▲' : ' ▼';
+    if ($cur_sort === $col) $arrow = $cur_dir === 'ASC' ? ' UP' : ' DOWN';
     $p = array_merge($extra, ['sort' => $col, 'dir' => $new_dir]);
     return '<th><a class="sort-link" href="?'.http_build_query($p).'">'.$label.$arrow.'</a></th>';
+}
+
+function th_report_sort(string $report, string $col, string $label, string $cur_sort, string $cur_dir, array $extra = []): string {
+    $sort_key = $report.'_sort';
+    $dir_key = $report.'_dir';
+    $p = array_merge(['page' => 'reports'], $extra);
+    unset($p[$sort_key], $p[$dir_key]);
+
+    $arrow = '';
+    if ($cur_sort !== $col || !in_array($cur_dir, ['ASC', 'DESC'], true)) {
+        $p[$sort_key] = $col;
+        $p[$dir_key] = 'asc';
+    } elseif ($cur_dir === 'ASC') {
+        $arrow = ' UP';
+        $p[$sort_key] = $col;
+        $p[$dir_key] = 'desc';
+    } else {
+        $arrow = ' DOWN';
+    }
+
+    return '<th><a class="sort-link" href="?'.http_build_query($p).'">'.$label.$arrow.'</a></th>';
+}
+
+function safe_report_sort(string $report, array $allowed): string {
+    $sort = $_GET[$report.'_sort'] ?? '';
+    return in_array($sort, $allowed[$report] ?? [], true) ? $sort : '';
+}
+
+function safe_report_dir(string $report): string {
+    $dir = strtolower($_GET[$report.'_dir'] ?? '');
+    return in_array($dir, ['asc', 'desc'], true) ? strtoupper($dir) : '';
+}
+
+function report_order_by(string $sort, string $dir, string $label_col): string {
+    if ($sort !== '' && in_array($dir, ['ASC', 'DESC'], true)) {
+        $secondary = $sort === 'month' ? "$label_col ASC" : "month DESC";
+        return "ORDER BY $sort $dir, $secondary";
+    }
+    return "ORDER BY month DESC, $label_col ASC";
 }
 
 $allowed_sorts = [
@@ -173,6 +212,14 @@ tr:hover td { background: #f9fafb; }
 .pagination a { color: #4f46e5; text-decoration: none; }
 .pagination .disabled { color: #d1d5db; }
 .section { background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 24px; }
+.report-filters { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 24px; }
+.report-filters .search-bar { margin-bottom: 0; }
+.report-filters label { display: block; font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+.report-filters .filter-field { min-width: 160px; flex: 1; }
+.report-filters .filter-field select, .report-filters .filter-field input { width: 100%; }
+.report-actions { display: flex; gap: 8px; align-self: end; }
+.report-section table { box-shadow: none; border: 1px solid #e5e7eb; }
+.empty-row { color: #6b7280; text-align: center; }
 .alert-success { background: #d1fae5; color: #065f46; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
 .alert-error   { background: #fee2e2; color: #991b1b; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
 .insert-form { background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
@@ -529,113 +576,213 @@ tr:hover td { background: #f9fafb; }
   <?= paginate_links('suppliers', $offset, $limit, $total, $extra) ?>
 
   <?php elseif ($page === 'reports'): ?>
-    <h2>Reports</h2>
-    <div class="section">
-        <h2>Monthly Orders by Customer</h2>
-        <table>
-            <tr>
-                <th>Customer</th>
-                <th>Month</th>
-                <th>Order Count</th>
-                <th>Total Amount</th>
-            </tr>
+    <h2>Reports / Pārskati</h2>
+    <?php
+      $report_views = ['all', 'customer', 'region', 'employee'];
+      $report_view = $_GET['report'] ?? 'all';
+      if (!in_array($report_view, $report_views, true)) $report_view = 'all';
 
-        <?php
-            $rows = $pdo->query("
-                SELECT c.company_name,
-                    TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
-                    COUNT(DISTINCT o.order_id) AS order_count,
-                    ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
-                FROM orders o
-                JOIN customers c ON c.customer_id = o.customer_id
-                JOIN order_details od ON od.order_id = o.order_id
-                GROUP BY c.company_name, DATE_TRUNC('month', o.order_date)
-                ORDER BY month DESC, c.company_name
-            ")->fetchAll();
+      $month_pattern = '/^\d{4}-(0[1-9]|1[0-2])$/';
+      $report_from = preg_match($month_pattern, $_GET['from'] ?? '') ? $_GET['from'] : '';
+      $report_to = preg_match($month_pattern, $_GET['to'] ?? '') ? $_GET['to'] : '';
+      $report_customer = trim($_GET['customer'] ?? '');
+      $report_region = trim($_GET['region'] ?? '');
+      $report_employee = ctype_digit($_GET['employee'] ?? '') ? $_GET['employee'] : '';
 
-            foreach ($rows as $r):
-            ?>
-            <tr>
-                <td><?= htmlspecialchars($r['company_name']) ?></td>
-                <td><?= htmlspecialchars($r['month']) ?></td>
-                <td><?= $r['order_count'] ?></td>
-                <td>$<?= number_format($r['total_amount'], 2) ?></td>
-            </tr>
-            <?php endforeach; ?>
-        </table>
+      $report_customers = $pdo->query("SELECT customer_id, company_name FROM customers ORDER BY company_name")->fetchAll();
+      $report_regions = $pdo->query("SELECT DISTINCT COALESCE(NULLIF(ship_region,''), 'Unknown') AS region FROM orders ORDER BY region")->fetchAll(PDO::FETCH_COLUMN);
+      $report_employees = $pdo->query("SELECT employee_id, CONCAT(first_name,' ',last_name) AS name FROM employees ORDER BY last_name, first_name")->fetchAll();
+
+      $where_parts = ["o.order_date IS NOT NULL"];
+      $report_sql_params = [];
+      if ($report_from !== '') {
+          $where_parts[] = "o.order_date >= :from_date";
+          $report_sql_params[':from_date'] = $report_from.'-01';
+      }
+      if ($report_to !== '') {
+          $to_date = DateTimeImmutable::createFromFormat('!Y-m-d', $report_to.'-01');
+          if ($to_date) {
+              $where_parts[] = "o.order_date < :to_date";
+              $report_sql_params[':to_date'] = $to_date->modify('first day of next month')->format('Y-m-d');
+          }
+      }
+      if ($report_customer !== '') {
+          $where_parts[] = "o.customer_id = :customer_id";
+          $report_sql_params[':customer_id'] = $report_customer;
+      }
+      if ($report_region !== '') {
+          $where_parts[] = "COALESCE(NULLIF(o.ship_region,''), 'Unknown') = :ship_region";
+          $report_sql_params[':ship_region'] = $report_region;
+      }
+      if ($report_employee !== '') {
+          $where_parts[] = "o.employee_id = :employee_id";
+          $report_sql_params[':employee_id'] = $report_employee;
+      }
+      $where_sql = 'WHERE '.implode(' AND ', $where_parts);
+
+      $report_allowed_sorts = [
+          'customer' => ['customer', 'month', 'order_count', 'total_amount'],
+          'region'   => ['region', 'month', 'order_count', 'total_amount'],
+          'employee' => ['employee', 'month', 'order_count', 'total_amount'],
+      ];
+      $customer_sort = safe_report_sort('customer', $report_allowed_sorts);
+      $customer_dir = safe_report_dir('customer');
+      $region_sort = safe_report_sort('region', $report_allowed_sorts);
+      $region_dir = safe_report_dir('region');
+      $employee_sort = safe_report_sort('employee', $report_allowed_sorts);
+      $employee_dir = safe_report_dir('employee');
+      if ($customer_dir === '') $customer_sort = '';
+      if ($region_dir === '') $region_sort = '';
+      if ($employee_dir === '') $employee_sort = '';
+
+      $report_link_params = build_filter_params([
+          'report' => $report_view === 'all' ? null : $report_view,
+          'from' => $report_from,
+          'to' => $report_to,
+          'customer' => $report_customer,
+          'region' => $report_region,
+          'employee' => $report_employee,
+          'customer_sort' => $customer_sort,
+          'customer_dir' => $customer_sort !== '' ? strtolower($customer_dir) : '',
+          'region_sort' => $region_sort,
+          'region_dir' => $region_sort !== '' ? strtolower($region_dir) : '',
+          'employee_sort' => $employee_sort,
+          'employee_dir' => $employee_sort !== '' ? strtolower($employee_dir) : '',
+      ]);
+
+      $customer_rows = $region_rows = $employee_rows = [];
+      if ($report_view === 'all' || $report_view === 'customer') {
+          $stmt = $pdo->prepare("
+              SELECT
+                  c.company_name AS customer,
+                  TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
+                  COUNT(DISTINCT o.order_id) AS order_count,
+                  ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
+              FROM orders o
+              JOIN customers c ON c.customer_id = o.customer_id
+              JOIN order_details od ON od.order_id = o.order_id
+              $where_sql
+              GROUP BY c.company_name, DATE_TRUNC('month', o.order_date)
+              ".report_order_by($customer_sort, $customer_dir, 'customer')
+          );
+          $stmt->execute($report_sql_params);
+          $customer_rows = $stmt->fetchAll();
+      }
+      if ($report_view === 'all' || $report_view === 'region') {
+          $stmt = $pdo->prepare("
+              SELECT
+                  COALESCE(NULLIF(o.ship_region,''), 'Unknown') AS region,
+                  TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
+                  COUNT(DISTINCT o.order_id) AS order_count,
+                  ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
+              FROM orders o
+              JOIN order_details od ON od.order_id = o.order_id
+              $where_sql
+              GROUP BY COALESCE(NULLIF(o.ship_region,''), 'Unknown'), DATE_TRUNC('month', o.order_date)
+              ".report_order_by($region_sort, $region_dir, 'region')
+          );
+          $stmt->execute($report_sql_params);
+          $region_rows = $stmt->fetchAll();
+      }
+      if ($report_view === 'all' || $report_view === 'employee') {
+          $stmt = $pdo->prepare("
+              SELECT
+                  CONCAT(e.first_name, ' ', e.last_name) AS employee,
+                  TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
+                  COUNT(DISTINCT o.order_id) AS order_count,
+                  ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
+              FROM orders o
+              JOIN employees e ON e.employee_id = o.employee_id
+              JOIN order_details od ON od.order_id = o.order_id
+              $where_sql
+              GROUP BY e.first_name, e.last_name, DATE_TRUNC('month', o.order_date)
+              ".report_order_by($employee_sort, $employee_dir, 'employee')
+          );
+          $stmt->execute($report_sql_params);
+          $employee_rows = $stmt->fetchAll();
+      }
+
+      $report_sections = [
+          'customer' => ['title' => 'Monthly Orders by Customer', 'label' => 'Customer', 'key' => 'customer', 'rows' => $customer_rows, 'sort' => $customer_sort, 'dir' => $customer_dir],
+          'region' => ['title' => 'Monthly Orders by Region', 'label' => 'Region', 'key' => 'region', 'rows' => $region_rows, 'sort' => $region_sort, 'dir' => $region_dir],
+          'employee' => ['title' => 'Monthly Orders by Employee', 'label' => 'Employee', 'key' => 'employee', 'rows' => $employee_rows, 'sort' => $employee_sort, 'dir' => $employee_dir],
+      ];
+    ?>
+
+    <div class="report-filters">
+      <form class="search-bar" method="get">
+        <input type="hidden" name="page" value="reports">
+        <div class="filter-field">
+          <label>Report</label>
+          <select name="report">
+            <option value="all" <?= $report_view==='all'?'selected':'' ?>>All Reports</option>
+            <option value="customer" <?= $report_view==='customer'?'selected':'' ?>>By Customer</option>
+            <option value="region" <?= $report_view==='region'?'selected':'' ?>>By Region</option>
+            <option value="employee" <?= $report_view==='employee'?'selected':'' ?>>By Employee</option>
+          </select>
         </div>
-    <div class="section">
-        <h2>Monthly Orders by Region</h2>
-
-        <table>
-            <tr>
-                <th>Region</th>
-                <th>Month</th>
-                <th>Order Count</th>
-                <th>Total Amount</th>
-            </tr>
-
-            <?php
-            $rows = $pdo->query("
-                SELECT
-                    COALESCE(o.ship_region, 'Unknown') AS region,
-                    TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
-                    COUNT(DISTINCT o.order_id) AS order_count,
-                    ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
-                FROM orders o
-                JOIN order_details od ON od.order_id = o.order_id
-                GROUP BY region, DATE_TRUNC('month', o.order_date)
-                ORDER BY month DESC, region
-            ")->fetchAll();
-
-            foreach ($rows as $r):
-            ?>
-            <tr>
-                <td><?= htmlspecialchars($r['region']) ?></td>
-                <td><?= htmlspecialchars($r['month']) ?></td>
-                <td><?= $r['order_count'] ?></td>
-                <td>$<?= number_format($r['total_amount'], 2) ?></td>
-            </tr>
-            <?php endforeach; ?>
-        </table>
+        <div class="filter-field">
+          <label>From Month</label>
+          <input type="month" name="from" value="<?= htmlspecialchars($report_from) ?>">
+        </div>
+        <div class="filter-field">
+          <label>To Month</label>
+          <input type="month" name="to" value="<?= htmlspecialchars($report_to) ?>">
+        </div>
+        <div class="filter-field">
+          <label>Customer</label>
+          <select name="customer">
+            <option value="">All Customers</option>
+            <?php foreach ($report_customers as $c): ?><option value="<?= htmlspecialchars($c['customer_id']) ?>" <?= $report_customer===$c['customer_id']?'selected':'' ?>><?= htmlspecialchars($c['company_name']) ?></option><?php endforeach; ?>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>Region</label>
+          <select name="region">
+            <option value="">All Regions</option>
+            <?php foreach ($report_regions as $r): ?><option value="<?= htmlspecialchars($r) ?>" <?= $report_region===$r?'selected':'' ?>><?= htmlspecialchars($r) ?></option><?php endforeach; ?>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>Employee</label>
+          <select name="employee">
+            <option value="">All Employees</option>
+            <?php foreach ($report_employees as $e): ?><option value="<?= $e['employee_id'] ?>" <?= $report_employee===(string)$e['employee_id']?'selected':'' ?>><?= htmlspecialchars($e['name']) ?></option><?php endforeach; ?>
+          </select>
+        </div>
+        <div class="report-actions">
+          <button type="submit">Apply</button>
+          <a class="reset" href="?page=reports">Reset</a>
+        </div>
+      </form>
     </div>
 
-    <div class="section">
-        <h2>Monthly Orders by Employee</h2>
-
+    <?php foreach ($report_sections as $report_key => $section): ?>
+      <?php if ($report_view !== 'all' && $report_view !== $report_key) continue; ?>
+      <div class="section report-section">
+        <h2><?= htmlspecialchars($section['title']) ?></h2>
         <table>
-            <tr>
-                <th>Employee</th>
-                <th>Month</th>
-                <th>Order Count</th>
-                <th>Total Amount</th>
-            </tr>
-
-            <?php
-            $rows = $pdo->query("
-                SELECT
-                    CONCAT(e.first_name, ' ', e.last_name) AS employee,
-                    TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
-                    COUNT(DISTINCT o.order_id) AS order_count,
-                    ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
-                FROM orders o
-                JOIN employees e ON e.employee_id = o.employee_id
-                JOIN order_details od ON od.order_id = o.order_id
-                GROUP BY employee, DATE_TRUNC('month', o.order_date)
-                ORDER BY month DESC, employee
-            ")->fetchAll();
-
-            foreach ($rows as $r):
-            ?>
-            <tr>
-                <td><?= htmlspecialchars($r['employee']) ?></td>
-                <td><?= htmlspecialchars($r['month']) ?></td>
-                <td><?= $r['order_count'] ?></td>
-                <td>$<?= number_format($r['total_amount'], 2) ?></td>
-            </tr>
+          <tr>
+            <?= th_report_sort($report_key, $section['key'], $section['label'], $section['sort'], $section['dir'], $report_link_params) ?>
+            <?= th_report_sort($report_key, 'month', 'Month', $section['sort'], $section['dir'], $report_link_params) ?>
+            <?= th_report_sort($report_key, 'order_count', 'Order Count', $section['sort'], $section['dir'], $report_link_params) ?>
+            <?= th_report_sort($report_key, 'total_amount', 'Total Amount', $section['sort'], $section['dir'], $report_link_params) ?>
+          </tr>
+          <?php if (!$section['rows']): ?>
+            <tr><td colspan="4" class="empty-row">No matching report rows.</td></tr>
+          <?php else: ?>
+            <?php foreach ($section['rows'] as $r): ?>
+              <tr>
+                <td><?= htmlspecialchars($r[$section['key']] ?? '') ?></td>
+                <td><?= htmlspecialchars($r['month'] ?? '') ?></td>
+                <td><?= (int)$r['order_count'] ?></td>
+                <td>$<?= number_format((float)$r['total_amount'], 2) ?></td>
+              </tr>
             <?php endforeach; ?>
+          <?php endif; ?>
         </table>
-    </div>
+      </div>
+    <?php endforeach; ?>
 
 <?php elseif ($page === 'insert'): ?>
   <h2>Insert Record</h2>
