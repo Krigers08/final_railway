@@ -86,8 +86,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['insert_table'])) {
         }
         $insert_success = "Record added to $t.";
     } catch (PDOException $e) {
-        $insert_error = $e->getMessage();
+        $insert_error = friendly_insert_error($e, $t);
     }
+}
+
+function friendly_insert_error(PDOException $e, string $table): string {
+    $label = [
+        'customers' => 'Customer',
+        'products'  => 'Product',
+        'suppliers' => 'Supplier',
+        'employees' => 'Employee',
+        'orders'    => 'Order',
+    ][$table] ?? 'Record';
+
+    $state = $e->errorInfo[0] ?? $e->getCode();
+    $message = $e->getMessage();
+
+    if ($state === '23505') {
+        if ($table === 'customers' && strpos($message, '(customer_id)') !== false) {
+            return 'That Customer ID already exists. Please choose a different 5-character ID.';
+        }
+        return "$label could not be added because a record with the same unique value already exists.";
+    }
+
+    if ($state === '23502') {
+        return "$label could not be added because a required field is missing.";
+    }
+
+    if ($state === '23503') {
+        return "$label could not be added because one of the selected related records no longer exists.";
+    }
+
+    if (in_array($state, ['22P02', '22007', '22008'], true)) {
+        return "$label could not be added because one of the dates or numbers is not valid.";
+    }
+
+    if ($state === '22001') {
+        return "$label could not be added because one of the values is too long.";
+    }
+
+    return "$label could not be added. Please check the form values and try again.";
 }
 
 function paginate_links(string $page, int $offset, int $limit, int $total, array $extra = []): string {
@@ -576,7 +614,7 @@ tr:hover td { background: #f9fafb; }
   <?= paginate_links('suppliers', $offset, $limit, $total, $extra) ?>
 
   <?php elseif ($page === 'reports'): ?>
-    <h2>Reports / Pārskati</h2>
+    <h2>Reports</h2>
     <?php
       $report_views = ['all', 'customer', 'region', 'employee'];
       $report_view = $_GET['report'] ?? 'all';
