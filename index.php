@@ -542,7 +542,7 @@ tr:hover td { background: #f9fafb; }
 
         <?php
             $rows = $pdo->query("
-                SELECTc.company_name,
+                SELECT c.company_name,
                     TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM') AS month,
                     COUNT(DISTINCT o.order_id) AS order_count,
                     ROUND(SUM(od.unit_price * od.quantity * (1 - od.discount))::numeric, 2) AS total_amount
@@ -754,11 +754,18 @@ tr:hover td { background: #f9fafb; }
   </div>
   <script>
     function showFields(table) {
-      document.querySelectorAll('.field-group').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.field-group').forEach(el => {
+        el.classList.remove('active');
+        el.querySelectorAll('input, select, textarea').forEach(field => field.disabled = true);
+      });
       document.getElementById('submitBtn').style.display = 'none';
       if (table) {
         var el = document.getElementById('fields-' + table);
-        if (el) { el.classList.add('active'); document.getElementById('submitBtn').style.display = 'inline-block'; }
+        if (el) {
+          el.classList.add('active');
+          el.querySelectorAll('input, select, textarea').forEach(field => field.disabled = false);
+          document.getElementById('submitBtn').style.display = 'inline-block';
+        }
       }
     }
     showFields(document.getElementById('tableSelect').value);
